@@ -1,0 +1,42 @@
+{
+    "main_window": {
+        "title": "AndroidToolBox 在线安装程序",
+        "sidebar": {
+            "start": "开始",
+            "license": "许可证",
+            "custom": "自定义",
+            "install": "安装",
+            "finish": "完成"
+        },
+        "up": "< 上一步",
+        "next": "下一步 >",
+        "exit": "取消",
+        "install": "安装",
+        "finish": "完成",
+        "agree": "同意",
+        "start_page": {
+            "title": "欢迎使用 AndroidToolBox 在线安装程序。",
+            "description": "这个安装程序将引导您完成 AndroidToolBox 的安装过程。请点击下一步继续。"
+        },
+        "license_page": {
+            "title": "许可证协议",
+            "description": "请仔细阅读以下许可证协议。您必须同意这些条款才能继续安装。",
+            "license_text": "$file:LICENSE"
+        },
+        "custom_page": {
+            "title": "自定义安装",
+            "description": "请选择您要安装的组件。",
+            "browser": "浏览",
+            "select_folder": "选择文件夹",
+            "install_to": "安装到："
+        },
+        "install_page": {
+            "title": "正在安装...",
+            "confirm_installation": "确认安装",
+            "confirm_installation_message": "安装目录不是空的。继续吗？这可能会覆盖现有文件。",
+            "installation_failed": "安装失败",
+            "installation_successful": "安装成功",
+            "installing": "正在安装..."
+        }
+    }
+}

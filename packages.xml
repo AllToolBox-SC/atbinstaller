@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<packages>
+    <section id="Nc.Atb" name="AndroidToolBox" nouserselect="true" default="true">
+        <package id="Nc.Atb.Core" name='{"zh_CN":"AndroidToolBox核心组件","en_US":"AndroidToolBox Core Component"}' description="" official="true" type="core" author="AtbDev" required="true" default="true">
+            <version name="1.3.6 LTS" code="10306" downloadurl="https://example.com/core_10306.tar.xz" filetype="txz" installto="/" unpack="true"/>
+            <version name="1.4.1" code="10401" downloadurl="https://example.com/core_10401.tar.xz" filetype="txz" installto="/" unpack="true"/>
+        </package>
+    
+    </section>
+    <section id="External.Devices" name='{"zh_CN":"设备兼容性","en_US":"Device Compatibility"}' default="false">
+        <package id="External.Devices.ND03" name="ND03" description="" official="true" type="compatibility" author="AtbDev" required="false" default="false">
+            <version name="3.0.2" code="30002" downloadurl="https://example.com/100/ND03.zip" filetype="zip" installto="/bin/EDL/" unpack="false"/>
+        </package>
+    </section>
+</packages>

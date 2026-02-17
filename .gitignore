@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+dist/
+build/
+test_*.py
+*_test.py
+*.pyc
+test/
+*.log
+.qwen/
+/111.py
