@@ -13,6 +13,8 @@ data = {
 
 
 def main():
+    # os.add_dll_directory(os.path.dirname(os.path.abspath(__file__)))
+    # os.add_dll_directory(os.path.dirname(os.path.abspath(sys.executable)))
     # Load global data
     with open(os.path.join(os.path.dirname(__file__), "locals/global.json"), "r", encoding="utf-8") as f:
         data["$global"] = json.load(f)

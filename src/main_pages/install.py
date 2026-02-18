@@ -3,13 +3,14 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from typing import List
 from utils import get_download_url
 import os
+import re
 import asyncio
 import tempfile
 import zipfile
 import tarfile
 import requests
 import shutil
-import py7zr
+import subprocess
 
 
 class DownloadWorker(QThread):
@@ -97,13 +98,75 @@ class UnpackWorker(QThread):
                         percent = int((i + 1) * 100 / total_files)
                         self.progress.emit(percent)
             elif self.file_path.endswith(".7z"):
-                with py7zr.SevenZipFile(self.file_path, mode='r') as archive:
-                    all_files = archive.getnames()
-                    total_files = len(all_files)
-                    for i, member in enumerate(all_files):
-                        archive.extract(targets=[member], path=self.extract_to)
-                        percent = int((i + 1) * 100 / total_files)
-                        self.progress.emit(percent)
+                # with py7zr.SevenZipFile(self.file_path, mode='r') as archive:
+                #     all_files = archive.getnames()
+                #     total_files = len(all_files)
+                #     for i, member in enumerate(all_files):
+                #         archive.extract(targets=[member], path=self.extract_to)
+                #         percent = int((i + 1) * 100 / total_files)
+                #         self.progress.emit(percent)
+                # with libarchive.file_reader(self.file_path) as archive:
+                #     total_files = sum(1 for _ in archive)
+                # if total_files <= 0:
+                #     total_files = 1
+                # with libarchive.file_reader(self.file_path) as archive:
+                #     for i, entry in enumerate(archive):
+                #         member = getattr(entry, "pathname", "")
+                #         if not member:
+                #             percent = int((i + 1) * 100 / total_files)
+                #             self.progress.emit(percent)
+                #             continue
+                #         relative_member = os.path.normpath(member.lstrip("/\\"))
+                #         if relative_member.startswith(".."):
+                #             raise ValueError(f"Unsafe archive member path: {member}")
+                #         target_path = os.path.join(self.extract_to, relative_member)
+                #         is_dir = member.endswith("/")
+                #         entry_isdir = getattr(entry, "isdir", False)
+                #         if callable(entry_isdir):
+                #             is_dir = is_dir or bool(entry_isdir())
+                #         else:
+                #             is_dir = is_dir or bool(entry_isdir)
+                #         if is_dir:
+                #             os.makedirs(target_path, exist_ok=True)
+                #         else:
+                #             os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                #             try:
+                #                 with open(target_path, "wb") as f:
+                #                     for block in entry.get_blocks():
+                #                         f.write(block)
+                #             except IsADirectoryError:
+                #                 os.makedirs(target_path, exist_ok=True)
+                #         percent = int((i + 1) * 100 / total_files)
+                #         self.progress.emit(percent)
+                # archive = Py7zip()
+                # archive.extract(self.file_path, self.extract_to)
+                seven_zip_path = os.path.join("7z.exe")
+                if not os.path.exists(seven_zip_path):
+                    raise FileNotFoundError(f"7z executable not found: {seven_zip_path}")
+                cmd = [seven_zip_path, "x", self.file_path, f"-o{self.extract_to}", "-y", "-bsp1"]
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="ignore",
+                    bufsize=1,
+                )
+                percent_pattern = re.compile(r"(\d+)%")
+                if process.stdout is not None:
+                    for line in process.stdout:
+                        match = percent_pattern.search(line)
+                        if match:
+                            percent = max(0, min(100, int(match.group(1))))
+                            self.progress.emit(percent)
+                stderr_text = ""
+                if process.stderr is not None:
+                    stderr_text = process.stderr.read()
+                return_code = process.wait()
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, cmd, stderr=stderr_text)
+                self.progress.emit(100)
 
             else:
                 raise ValueError(f"Unsupported file type: {self.file_path}")
@@ -256,7 +319,7 @@ class InstallPage(QWidget):
 
     def install_package(self, package_id, version, unpack: bool = True):
         try:
-            url = asyncio.run(get_download_url("https://atb.xgj.qzz.io/", package_id, version))
+            url = asyncio.run(get_download_url(open(os.path.join("..", "api_server.txt")).read().rstrip() or "https://atb.xgj.qzz.io/", package_id, version))
             if not url:
                 raise ValueError("Empty download URL")
 

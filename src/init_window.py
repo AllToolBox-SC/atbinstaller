@@ -38,7 +38,7 @@ class InitWindow(QWidget):
 
     async def init_package_data(self):
         try:
-            api_url = self.data.get("api_url", "https://atb.xgj.qzz.io/")
+            api_url = open(os.path.join(os.path.dirname(__file__), "api_server.txt")).read().rstrip() or "http://atb.xgj.qzz.io/"
             packages_xml = await get_packages(api_url)
             return packages_xml
         except Exception as e:
