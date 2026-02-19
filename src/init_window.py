@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QProgressBar
 from PyQt6.QtCore import Qt
 from utils import get_packages
+from utils.theme import is_dark_mode, window_qss, progress_qss
 import os
 import sys
 import json
@@ -18,8 +19,10 @@ class InitWindow(QWidget):
 
     def init_ui(self):
         try:
+            dark_mode = is_dark_mode(self)
             layout = QVBoxLayout(self)
             layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.setStyleSheet(window_qss(dark_mode))
 
             title_label = QLabel("Initializing...", self)
             title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
@@ -27,10 +30,7 @@ class InitWindow(QWidget):
 
             self.progress_bar = QProgressBar(self)
             self.progress_bar.setRange(0, 0)
-            self.progress_bar.setStyleSheet(
-                "QProgressBar { border: 1px solid #fff; border-radius: 5px; background-color: rgba(0,0,0,0); }"
-                "QProgressBar::chunk { background-color: #1F9B5D; }"
-            )
+            self.progress_bar.setStyleSheet(progress_qss(dark_mode))
             layout.addWidget(self.progress_bar)
             self.setLayout(layout)
         except Exception as e:

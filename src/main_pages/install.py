@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgress
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from typing import List
 from utils import get_download_url
+from utils.theme import is_dark_mode, progress_qss
 import os
 import re
 import asyncio
@@ -11,6 +12,9 @@ import tarfile
 import requests
 import shutil
 import subprocess
+import math
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class DownloadWorker(QThread):
@@ -19,34 +23,137 @@ class DownloadWorker(QThread):
     finished = pyqtSignal(str)
     error = pyqtSignal(str)
 
-    def __init__(self, url, save_path):
+    def __init__(self, url, save_path, nmp=False, proxy=""):
         super().__init__()
         self.url = url
         self.save_path = save_path
+        self.nmp = bool(nmp)
+        self.proxy = proxy
+        self._stop_event = threading.Event()
+        self._executor = None
+
+    def stop(self):
+        self._stop_event.set()
+        self.requestInterruption()
+        if self._executor is not None:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def _make_proxies(self):
+        if not self.proxy:
+            return None
+        return {"http": self.proxy, "https": self.proxy}
+
+    def _download_single(self, headers, proxies):
+        if self._stop_event.is_set() or self.isInterruptionRequested():
+            raise RuntimeError("Download cancelled")
+        response = requests.get(self.url, stream=True, headers=headers, timeout=30, proxies=proxies)
+        response.raise_for_status()
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+
+        with open(self.save_path, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                if self._stop_event.is_set() or self.isInterruptionRequested():
+                    raise RuntimeError("Download cancelled")
+                if chunk:
+                    file.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        percent = int(downloaded * 100 / total_size)
+                        self.progress.emit(percent)
+
+    def _supports_range(self, headers, proxies):
+        head_resp = requests.head(self.url, headers=headers, timeout=30, allow_redirects=True, proxies=proxies)
+        head_resp.raise_for_status()
+        total_size = int(head_resp.headers.get("content-length", 0))
+        accept_ranges = head_resp.headers.get("accept-ranges", "").lower()
+        if total_size <= 0:
+            return False, total_size
+        if "bytes" in accept_ranges:
+            return True, total_size
+        range_resp = requests.get(
+            self.url,
+            headers={**headers, "Range": "bytes=0-0"},
+            stream=True,
+            timeout=30,
+            proxies=proxies,
+        )
+        range_resp.raise_for_status()
+        return range_resp.status_code == 206, total_size
+
+    def _download_multi(self, headers, proxies, threads=8):
+        supports_range, total_size = self._supports_range(headers, proxies)
+        if not supports_range:
+            self._download_single(headers, proxies)
+            return
+
+        threads = max(1, int(threads))
+        part_size = int(math.ceil(total_size / threads))
+        lock = threading.Lock()
+        downloaded = 0
+
+        with open(self.save_path, "wb") as f:
+            f.truncate(total_size)
+
+        def _download_part(start, end):
+            nonlocal downloaded
+            if self._stop_event.is_set() or self.isInterruptionRequested():
+                raise RuntimeError("Download cancelled")
+            part_headers = {**headers, "Range": f"bytes={start}-{end}"}
+            resp = requests.get(self.url, stream=True, headers=part_headers, timeout=30, proxies=proxies)
+            resp.raise_for_status()
+            if resp.status_code != 206:
+                raise ValueError("Server does not support partial content")
+            offset = start
+            with open(self.save_path, "r+b") as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 64):
+                    if self._stop_event.is_set() or self.isInterruptionRequested():
+                        raise RuntimeError("Download cancelled")
+                    if not chunk:
+                        continue
+                    f.seek(offset)
+                    f.write(chunk)
+                    offset += len(chunk)
+                    with lock:
+                        downloaded += len(chunk)
+                        percent = int(downloaded * 100 / total_size)
+                        self.progress.emit(percent)
+
+        ranges = []
+        for i in range(threads):
+            start = i * part_size
+            if start >= total_size:
+                break
+            end = min(total_size - 1, start + part_size - 1)
+            ranges.append((start, end))
+
+        self._executor = ThreadPoolExecutor(max_workers=threads)
+        try:
+            futures = [self._executor.submit(_download_part, start, end) for start, end in ranges]
+            for future in as_completed(futures):
+                future.result()
+        finally:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+            self._executor = None
 
     def run(self):
         try:
             self.status.emit("Downloading...")
-
-            response = requests.get(self.url, stream=True, headers={"User-Agent":"pan.baidu.com"}, timeout=30)
-            response.raise_for_status()
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded = 0
-
-            with open(self.save_path, 'wb') as file:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        file.write(chunk)
-                        downloaded += len(chunk)
-
-                        if total_size > 0:
-                            percent = int(downloaded * 100 / total_size)
-                            self.progress.emit(percent)
+            headers = {"User-Agent": "pan.baidu.com"}
+            proxies = self._make_proxies()
+            if not self.nmp:
+                self._download_multi(headers=headers, proxies=proxies, threads=8)
+            else:
+                self._download_single(headers=headers, proxies=proxies)
 
             self.status.emit("Download complete")
             self.finished.emit(self.save_path)
         except requests.exceptions.Timeout:
             error_msg = "Download timed out"
+            print(error_msg)
+            self.error.emit(error_msg)
+        except RuntimeError as e:
+            error_msg = str(e)
             print(error_msg)
             self.error.emit(error_msg)
         except requests.exceptions.ConnectionError:
@@ -140,7 +247,7 @@ class UnpackWorker(QThread):
                 #         self.progress.emit(percent)
                 # archive = Py7zip()
                 # archive.extract(self.file_path, self.extract_to)
-                seven_zip_path = os.path.join("7z.exe")
+                seven_zip_path = os.path.join(os.path.dirname(__file__), "..", "7z.exe")
                 if not os.path.exists(seven_zip_path):
                     raise FileNotFoundError(f"7z executable not found: {seven_zip_path}")
                 cmd = [seven_zip_path, "x", self.file_path, f"-o{self.extract_to}", "-y", "-bsp1"]
@@ -190,21 +297,26 @@ class UnpackWorker(QThread):
 class InstallPage(QWidget):
     installation_completed = pyqtSignal(int)
 
-    def __init__(self, *data: List[dict]):
+    def __init__(self, *data: list):
         super().__init__()
         self.data = data[0] if data else {}
         self.packages = data[1] if len(data) > 1 else {}
-        self.install_to = data[2] if len(data) > 2 else os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "AndroidToolBox")
+        self.install_to = data[2] if len(data) > 2 else os.path.join("C:\\", "AndroidToolBox")
+
+        self.nmp = data[3] if len(data) > 3 else False
+        self.proxy = data[4] if len(data) > 4 else ""
 
         self.installation_started = False
         self.current_package_index = 0
         self.download_worker = None
         self.unpack_worker = None
+        self._aborting = False
 
         self.init_ui()
 
     def init_ui(self):
         try:
+            dark_mode = is_dark_mode(self)
             layout = QVBoxLayout(self)
             layout.setContentsMargins(10, 0, 0, 0)
             layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -223,10 +335,7 @@ class InstallPage(QWidget):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
             self.progress_bar.setTextVisible(False)
-            self.progress_bar.setStyleSheet(
-                "QProgressBar { border: 1px solid #fff; border-radius: 5px; background-color: rgba(0,0,0,0); }"
-                "QProgressBar::chunk { background-color: #1F9B5D; }"
-            )
+            self.progress_bar.setStyleSheet(progress_qss(dark_mode))
             layout.addWidget(self.progress_bar)
 
             self.details_content = self.data.get("install_page", {}).get("details", "Details: ")
@@ -238,10 +347,7 @@ class InstallPage(QWidget):
             self.details_progress.setRange(0, 100)
             self.details_progress.setValue(0)
             self.details_progress.setTextVisible(False)
-            self.details_progress.setStyleSheet(
-                "QProgressBar { border: 1px solid #fff; border-radius: 5px; background-color: rgba(0,0,0,0); }"
-                "QProgressBar::chunk { background-color: #1F9B5D; }"
-            )
+            self.details_progress.setStyleSheet(progress_qss(dark_mode))
 
             layout.addWidget(self.details_progress)
             self.setLayout(layout)
@@ -290,7 +396,7 @@ class InstallPage(QWidget):
             self.install_next_package()
         except Exception as e:
             print(f"Error in install_packages: {e}")
-            self.update_status(f"Error: {str(e)}")
+            self.abort_installation(f"Error: {str(e)}")
 
     def install_next_package(self):
         try:
@@ -315,11 +421,41 @@ class InstallPage(QWidget):
             self.install_package(package_id, version, unpack=unpack)
         except Exception as e:
             print(f"Error in install_next_package: {e}")
-            self.update_status(f"Error: {str(e)}")
+            self.abort_installation(f"Error: {str(e)}")
+
+    def stop_all_workers(self):
+        if self.download_worker is not None:
+            try:
+                self.download_worker.stop()
+            except Exception:
+                pass
+            if self.download_worker.isRunning():
+                self.download_worker.wait(1500)
+                if self.download_worker.isRunning():
+                    self.download_worker.terminate()
+                    self.download_worker.wait(500)
+            self.download_worker = None
+
+        if self.unpack_worker is not None:
+            if self.unpack_worker.isRunning():
+                self.unpack_worker.requestInterruption()
+                self.unpack_worker.wait(1000)
+                if self.unpack_worker.isRunning():
+                    self.unpack_worker.terminate()
+                    self.unpack_worker.wait(500)
+            self.unpack_worker = None
+
+    def abort_installation(self, message: str, status_code: int = 2):
+        if self._aborting:
+            return
+        self._aborting = True
+        self.update_status(message)
+        self.stop_all_workers()
+        self.installation_completed.emit(status_code)
 
     def install_package(self, package_id, version, unpack: bool = True):
         try:
-            url = asyncio.run(get_download_url(open(os.path.join("..", "api_server.txt")).read().rstrip() or "https://atb.xgj.qzz.io/", package_id, version))
+            url = asyncio.run(get_download_url(open(os.path.join(os.path.dirname(__file__), "..", "api_server.txt")).read().rstrip() or "https://atb.xgj.qzz.io/", package_id, version))
             if not url:
                 raise ValueError("Empty download URL")
 
@@ -329,7 +465,7 @@ class InstallPage(QWidget):
 
             save_path = os.path.join(tempfile.gettempdir(), filename)
 
-            self.download_worker = DownloadWorker(url, save_path)
+            self.download_worker = DownloadWorker(url, save_path, nmp=self.nmp, proxy=self.proxy)
             self.download_worker.progress.connect(self.update_details_progress)
             self.download_worker.status.connect(self.update_status)
             self.download_worker.finished.connect(self.on_download_finished)
@@ -379,11 +515,13 @@ class InstallPage(QWidget):
                     self.on_unpack_error(f"Failed to copy file: {str(e)}")
         except Exception as e:
             print(f"Error in on_download_finished: {e}")
-            self.update_status(f"Error: {str(e)}")
+            self.abort_installation(f"Error: {str(e)}")
 
     def on_download_error(self, error_msg):
-        self.update_status(error_msg)
-        QMessageBox.warning(self, "Download Failed", f"Failed to download package: {error_msg}\n\nRetry or cancel?")
+        if self._aborting:
+            return
+        self.abort_installation(f"Failed to download package: {error_msg}")
+        QMessageBox.warning(self, "Download Failed", f"Failed to download package: {error_msg}")
 
     def on_unpack_finished(self):
         try:
@@ -401,9 +539,12 @@ class InstallPage(QWidget):
             QTimer.singleShot(500, self.install_next_package)
         except Exception as e:
             print(f"Error in on_unpack_finished: {e}")
+            self.abort_installation(f"Error in unpack finish: {str(e)}")
 
     def on_unpack_error(self, error_msg):
-        self.update_status(error_msg)
+        if self._aborting:
+            return
+        self.abort_installation(f"Failed to extract package: {error_msg}")
         QMessageBox.warning(self, "Extraction Failed", f"Failed to extract package: {error_msg}")
 
     def update_progress(self, value):

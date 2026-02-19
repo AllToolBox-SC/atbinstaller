@@ -1,21 +1,25 @@
 from PyQt6.QtWidgets import QWidget, QListWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMessageBox
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QIcon, QPixmap
+from PyQt6.QtGui import QIcon, QPixmap, QCloseEvent
 from main_pages.start import StartPage
 from main_pages.license import LicensePage
 from main_pages.custom import CustomPage
 from main_pages.install import InstallPage
 from main_pages.complete import CompletePage
+from utils.theme import is_dark_mode, window_qss, nav_list_qss, button_qss
 from typing import List, Optional, Dict
 import sys
 
 class MainWindow(QWidget):
-    def __init__(self, *data: List[dict]):
+    def __init__(self, *data: list):
         super().__init__()
         self.data = local_data = dict(data[0].get("main_window", {})) if data else {}
         global_data: dict = data[0].get("$global", {}) if data else {}
 
         self.webdata: dict = data[1] if len(data) > 1 else {}
+
+        self.nmp: bool = data[2] if len(data) > 2 else False
+        self.proxy: str = data[3] if len(data) > 3 else ""
 
         title = local_data.get("title", global_data.get("title", "AndroidToolBox Online Installer"))
         self.setWindowTitle(title)
@@ -34,10 +38,23 @@ class MainWindow(QWidget):
     def on_destroyed(self):
         print("MainWindow destroyed")
 
+    def closeEvent(self, event: QCloseEvent):
+        try:
+            # Block any window close action while installation is in progress.
+            if hasattr(self, "nav_list") and self.nav_list.currentRow() == 3:
+                QMessageBox.warning(self, "Warning", "Installation is in progress. Exiting is disabled.")
+                event.ignore()
+                return
+        except Exception as e:
+            print(f"Error in closeEvent: {e}")
+        super().closeEvent(event)
+
     def init_ui(self):
+        dark_mode = is_dark_mode(self)
         self.mainlayout = QHBoxLayout(self)
         self.setLayout(self.mainlayout)
         self.mainlayout.setContentsMargins(10, 10, 10, 10)
+        self.setStyleSheet(window_qss(dark_mode))
         self.nav_list = QListWidget(self)
         for key, value in self.data.get("sidebar", {}).items():
             self.nav_list.addItem(value)
@@ -47,17 +64,14 @@ class MainWindow(QWidget):
         self.nav_list.resize(150, self.height())
         self.nav_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.nav_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.nav_list.setStyleSheet(
-            "QListWidget { background-color: rgba(0,0,0,0); border: none; outline: none; }"
-            "QListWidget::item { border: none; padding: 5px; outline: none; }"
-            "QListWidget::item:selected { background-color: rgba(0,0,0,0); color: #1F9B5D; outline: none; }"
-            "QListWidget::item:hover { background-color: rgba(80,80,80,100); }"
-        )
+        self.nav_list.setStyleSheet(nav_list_qss(dark_mode))
         self.nav_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.nav_list.setEditTriggers(QListWidget.EditTrigger.NoEditTriggers)
         self.nav_list.setTextElideMode(Qt.TextElideMode.ElideRight)
         self.nav_list.setCurrentIndex(self.nav_list.model().index(0, 0))
         self.nav_list.currentRowChanged.connect(self.on_nav_changed)
+        self.nav_list.setEnabled(False)
+        self.nav_list.setDisabled(True)
 
         self.contents = QVBoxLayout(self)
         self.contents.setContentsMargins(0, 10, 0, 0)
@@ -85,19 +99,13 @@ class MainWindow(QWidget):
         ]
         for button in self.control_btns:
             button.setFixedSize(100, 35)
-            button.setStyleSheet("QPushButton { background-color: rgba(0,0,0,0); border: 1px solid #fff; color: #fff; border-radius: 5px; }"
-                                    "QPushButton:disabled { background-color: rgba(0,0,0,0); border: 1px solid #555; color: #555; }"
-                                    "QPushButton:hover:!disabled { background-color: rgba(255,255,255,30); border: 1px solid #fff; }"
-                                    "QPushButton:pressed:!disabled { background-color: #1F9B5D; border: 0; color: #fff; }")
+            button.setStyleSheet(button_qss(dark_mode))
             self.button_group.addWidget(button)
         self.button_group.setSpacing(10)
         self.exit_btn = QPushButton(self.data.get("exit", "Cancel"), self)
         self.exit_btn.setFixedSize(100, 35)
         self.exit_btn.clicked.connect(self.close)
-        self.exit_btn.setStyleSheet("QPushButton { background-color: rgba(0,0,0,0); border: 1px solid #fff; color: #fff; border-radius: 5px; }"
-                                    "QPushButton:disabled { background-color: rgba(0,0,0,0); border: 1px solid #555; color: #555; }"
-                                    "QPushButton:hover:!disabled { background-color: rgba(255,255,255,30); border: 1px solid #fff; }"
-                                    "QPushButton:pressed:!disabled { background-color: #1F9B5D; border: 0; color: #fff; }")
+        self.exit_btn.setStyleSheet(button_qss(dark_mode))
         self.button_group.addWidget(self.exit_btn)
         self.update_button_states()
         self.control_btns[0].clicked.connect(self.go_previous)
@@ -155,7 +163,6 @@ class MainWindow(QWidget):
                     self.focus_contents.addWidget(self.custom_page)
 
                 case 3:
-                    self.nav_list.setDisabled(True)
                     try:
                         self.control_btns[1].clicked.disconnect()
                     except TypeError:
@@ -164,7 +171,9 @@ class MainWindow(QWidget):
                     self.install_page = InstallPage(
                         self.data,
                         self.selected_components if hasattr(self, 'selected_components') else {},
-                        self.installation_path if hasattr(self, 'installation_path') else ""
+                        self.installation_path if hasattr(self, 'installation_path') else "",
+                        self.nmp,
+                        self.proxy
                     )
                     self.install_page.installation_completed.connect(self.on_installation_completed)
 
@@ -184,14 +193,12 @@ class MainWindow(QWidget):
                             self.go_install(),
                             self.go_next()
                         })
-                        self.nav_list.setDisabled(False)
                         for button in self.control_btns:
                             button.setDisabled(False)
                         self.exit_btn.setDisabled(False)
                         self.nav_list.setCurrentRow(2)
 
                 case 4:
-                    self.nav_list.setDisabled(False)
                     self.complete_page = CompletePage(self.data, getattr(self, "install_status_code", 0))
                     self.focus_contents.addWidget(self.complete_page)
 
@@ -266,7 +273,6 @@ class MainWindow(QWidget):
     def on_installation_completed(self, status_code: int = 0):
         try:
             self.install_status_code = status_code
-            self.nav_list.setDisabled(False)
             self.nav_list.setCurrentRow(4)
             self.update_button_states()
         except Exception as e:

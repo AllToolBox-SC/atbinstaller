@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt
 import os
 from compose.InstallSelector import InstallSelector
 from compose.package_parser import parse_packages_xml, populate_install_selector
+from utils.theme import is_dark_mode, button_qss
 
 
 class CustomPage(QWidget):
@@ -17,6 +18,7 @@ class CustomPage(QWidget):
 
     def init_ui(self):
         try:
+            dark_mode = is_dark_mode(self)
             layout = QVBoxLayout(self)
             layout.setContentsMargins(10, 0, 0, 0)
             layout.setAlignment(Qt.AlignmentFlag.AlignTop)
@@ -56,18 +58,14 @@ class CustomPage(QWidget):
             install_to_layout.addWidget(install_to_label)
             install_to_textbox = QTextEdit(self)
             install_to_textbox.setFixedHeight(30)
-            default_path = os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "AndroidToolBox")
+            default_path = os.path.join("C:\\", "AndroidToolBox")
             install_to_textbox.setText(default_path)
             setattr(self, 'install_to', default_path)
             install_to_textbox.textChanged.connect(lambda: setattr(self, 'install_to', install_to_textbox.toPlainText()))
             install_to_layout.addWidget(install_to_textbox)
             install_to_btn = QPushButton(self.data.get("custom_page", {}).get("browser", "Browse"), self)
             install_to_btn.setFixedSize(80, 30)
-            install_to_btn.setStyleSheet(
-                "QPushButton { background-color: rgba(0,0,0,0); border: 1px solid #fff; color: #fff; border-radius: 5px; }"
-                "QPushButton:disabled { background-color: rgba(0,0,0,0); border: 1px solid #555; color: #555; }"
-                "QPushButton:hover:!disabled { background-color: rgba(255,255,255,30); border: 1px solid #fff; }"
-            )
+            install_to_btn.setStyleSheet(button_qss(dark_mode))
             install_to_btn.clicked.connect(lambda: self.browse_folder(install_to_textbox))
             install_to_layout.addWidget(install_to_btn)
             layout.addLayout(install_to_layout)
@@ -132,9 +130,9 @@ class CustomPage(QWidget):
 
     def get_installation_path(self):
         try:
-            return getattr(self, 'install_to', '') or os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "AndroidToolBox")
+            return getattr(self, 'install_to', '') or os.path.join("C:\\", "AndroidToolBox")
         except Exception:
-            return os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "AndroidToolBox")
+            return os.path.join("C:\\", "AndroidToolBox")
 
     def browse_folder(self, textbox):
         try:

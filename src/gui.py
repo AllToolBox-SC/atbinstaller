@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QGuiApplication
 from main_window import MainWindow
@@ -8,9 +8,11 @@ import sys
 import asyncio
 
 class App(QApplication):
-    def __init__(self, data: dict):
+    def __init__(self, *data: list):
         super().__init__(sys.argv)
-        self.data = data
+        self.data = data[0] if len(data) > 0 else {}
+        self.nmp = data[1] if len(data) > 1 else False
+        self.proxy = data[2] if len(data) > 2 else ""
         self.init_window = None
         self.main_window = None
 
@@ -26,7 +28,6 @@ class App(QApplication):
 
     def _show_error(self, title, message):
         try:
-            from PyQt6.QtWidgets import QMessageBox
             msg_box = QMessageBox()
             msg_box.setIcon(QMessageBox.Icon.Critical)
             msg_box.setText(title)
@@ -44,7 +45,6 @@ class App(QApplication):
             self.package_xml = await self.init_window.init_package_data()
 
             if self.package_xml is None:
-                from PyQt6.QtWidgets import QMessageBox
                 msg_box = QMessageBox()
                 msg_box.setIcon(QMessageBox.Icon.Critical)
                 msg_box.setText("Failed to fetch package info")
@@ -57,7 +57,7 @@ class App(QApplication):
                 self.init_window.close()
                 self.init_window.deleteLater()
 
-            self.main_window = MainWindow(self.data, self.package_xml)
+            self.main_window = MainWindow(self.data, self.package_xml, self.nmp, self.proxy)
             self.main_window.show()
             self.main_window.raise_()
             self.main_window.activateWindow()
