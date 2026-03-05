@@ -1,10 +1,9 @@
 from PyQt6.QtGui import QPalette
 from PyQt6.QtWidgets import QWidget
-
+from darkdetect import isDark
 
 def is_dark_mode(widget: QWidget) -> bool:
-    window_color = widget.palette().color(QPalette.ColorRole.Window)
-    return window_color.lightness() < 128
+    return isDark()
 
 
 def window_qss(dark_mode: bool) -> str:

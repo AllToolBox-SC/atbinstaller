@@ -251,8 +251,15 @@ class UnpackWorker(QThread):
                 if not os.path.exists(seven_zip_path):
                     raise FileNotFoundError(f"7z executable not found: {seven_zip_path}")
                 cmd = [seven_zip_path, "x", self.file_path, f"-o{self.extract_to}", "-y", "-bsp1"]
-                process = subprocess.Popen(
-                    cmd,
+                # Hide external 7z console window on Windows
+                startupinfo = None
+                creationflags = 0
+                if os.name == "nt":
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = getattr(subprocess, "SW_HIDE", 0)
+                    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                proc_kwargs = dict(
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
@@ -260,6 +267,11 @@ class UnpackWorker(QThread):
                     errors="ignore",
                     bufsize=1,
                 )
+                if startupinfo is not None:
+                    proc_kwargs["startupinfo"] = startupinfo
+                if creationflags:
+                    proc_kwargs["creationflags"] = creationflags
+                process = subprocess.Popen(cmd, **proc_kwargs)
                 percent_pattern = re.compile(r"(\d+)%")
                 if process.stdout is not None:
                     for line in process.stdout:
